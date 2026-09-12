@@ -71,7 +71,8 @@ function snakeOrder(numTeams, rounds) {
 async function tick() {
   let data;
   try {
-    data = await (await fetch('state/draft_progress.json', {cache: 'no-store'})).json();
+    const season = new Date().getFullYear();
+    data = await (await fetch(`state/league_${season}.json`, {cache: 'no-store'})).json();
   } catch (e) {
     document.getElementById('status').textContent = 'Waiting for draft to start…';
     return;

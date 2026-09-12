@@ -14,7 +14,7 @@ from datetime import datetime
 from engine.data import load_players, draftable_players, weekly_points
 from engine.league import Team
 from engine.draft import run_draft, print_draft_summary
-from engine.state import load_league, save_league
+from engine.state import load_league, save_league, teams_from_payload, teams_to_json
 from agents.base import HeuristicAgent, LLMAgent
 from agents.providers import make_provider
 from config import LEAGUE
@@ -51,26 +51,28 @@ def build_field() -> tuple[list[Team], dict]:
 def cmd_draft(season: int, force: bool = False):
     existing = load_league(season)
     if existing and not force:
+        teams = teams_from_payload(existing)
         print(f"A draft for {season} already exists at state/league_{season}.json — not re-drafting.")
         print(f"Pass --force to discard it and draft again: python run.py draft {season} --force")
-        print_draft_summary(existing[0])
-        return existing[0]
+        print_draft_summary(teams)
+        return teams
 
     teams, agents = build_field()
     teams, log = run_draft(teams, agents)
     print(f"Draft complete: {len(log)} picks across {len(teams)} teams.")
     print_draft_summary(teams)
-    save_league(season, teams, log, {})
+    save_league(season, teams=teams_to_json(teams), pick_log=log, weekly_results={})
     print(f"\nSaved to state/league_{season}.json — `season` runs will read rosters from here all year.")
     return teams
 
 
 def cmd_season(season: int, start: int, end: int, rescore: bool = False):
-    loaded = load_league(season)
-    if not loaded:
+    payload = load_league(season)
+    if not payload:
         print(f"No saved draft for {season}. Run `python run.py draft {season}` first.")
         return
-    teams, draft_log, weekly_results = loaded
+    teams = teams_from_payload(payload)
+    weekly_results = payload.get("weekly_results", {})
     agents = build_agents()
     players_raw = load_players()
     pmap = {p["id"]: p for p in draftable_players(players_raw)}
@@ -93,7 +95,7 @@ def cmd_season(season: int, start: int, end: int, rescore: bool = False):
             week_scores[t.name] = pts
             print(f"  {t.name:<15} {pts:>6.2f}")
         weekly_results[key] = week_scores
-        save_league(season, teams, draft_log, weekly_results)
+        save_league(season, weekly_results=weekly_results)
 
     standings = {t.name: 0.0 for t in teams}
     for wk_scores in weekly_results.values():

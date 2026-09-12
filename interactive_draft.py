@@ -9,24 +9,24 @@ A human (or an orchestrating Claude Code session) drives the loop:
 
 Heuristic-controlled teams are resolved automatically inside `context` (no
 decision needed from the orchestrator). LLM-controlled teams stop and wait for
-a `pick`. State — including a flat pick log — is persisted to
-state/draft_progress.json between invocations, and doubles as the data source
-for draft_board.html's live view.
+a `pick`. State is persisted through engine/state.py to
+state/league_<season>.json — the same file run.py's `season` command reads —
+and doubles as the data source for draft_board.html's live view. Season
+defaults to the current year; override with the DRAFT_SEASON env var.
 """
 from __future__ import annotations
 import json
 import os
 import sys
+from datetime import datetime
 
 from engine.data import load_players, draftable_players
 from engine.league import Team, snake_order, ROUNDS
+from engine.state import load_league, save_league, teams_from_payload, teams_to_json
 from agents.base import HeuristicAgent
 from config import LEAGUE
 
-STATE_PATH = os.environ.get(
-    "INTERACTIVE_DRAFT_STATE",
-    os.path.join(os.path.dirname(__file__), "state", "draft_progress.json"),
-)
+SEASON = int(os.environ.get("DRAFT_SEASON", datetime.now().year))
 
 
 def _is_llm(entry: dict) -> bool:
@@ -56,34 +56,22 @@ def _meta() -> dict:
 
 
 def _load():
-    if os.path.exists(STATE_PATH):
-        with open(STATE_PATH) as f:
-            payload = json.load(f)
-        teams = [
-            Team(name=t["name"], agent=t["agent"], draft_slot=t["draft_slot"], roster=t["roster"], memory=t.get("memory", {}))
-            for t in payload["teams"]
-        ]
-        return teams, payload["overall"], payload["pick_log"]
+    payload = load_league(SEASON)
+    if payload is not None:
+        return teams_from_payload(payload), payload.get("overall", 1), payload.get("pick_log", [])
     teams = [Team(name=e["name"], agent=e["name"], draft_slot=i) for i, e in enumerate(LEAGUE, start=1)]
     return teams, 1, []
 
 
 def _save(teams, overall, pick_log, status):
-    os.makedirs(os.path.dirname(STATE_PATH), exist_ok=True)
-    payload = {
-        "meta": _meta(),
-        "status": status,
-        "overall": overall,
-        "teams": [
-            {"name": t.name, "agent": t.agent, "draft_slot": t.draft_slot, "roster": t.roster, "memory": t.memory}
-            for t in teams
-        ],
-        "pick_log": pick_log,
-    }
-    tmp = STATE_PATH + ".tmp"
-    with open(tmp, "w") as f:
-        json.dump(payload, f, indent=2)
-    os.replace(tmp, STATE_PATH)
+    save_league(
+        SEASON,
+        meta=_meta(),
+        status=status,
+        overall=overall,
+        teams=teams_to_json(teams),
+        pick_log=pick_log,
+    )
 
 
 def cmd_context():
@@ -177,16 +165,10 @@ def cmd_grade():
     """Attach post-draft grades. Reads {"grades": [{"team","grade","summary"}, ...]}
     as JSON from stdin and merges it into the persisted state for the board to render."""
     grades = json.load(sys.stdin)["grades"]
-    if not os.path.exists(STATE_PATH):
+    if load_league(SEASON) is None:
         print(json.dumps({"error": "no draft state found — run the draft first"}))
         sys.exit(1)
-    with open(STATE_PATH) as f:
-        payload = json.load(f)
-    payload["grades"] = grades
-    tmp = STATE_PATH + ".tmp"
-    with open(tmp, "w") as f:
-        json.dump(payload, f, indent=2)
-    os.replace(tmp, STATE_PATH)
+    save_league(SEASON, grades=grades)
     print(json.dumps({"saved_grades_for": [g["team"] for g in grades]}))
 
 
