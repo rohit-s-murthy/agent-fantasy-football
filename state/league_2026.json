@@ -1078,5 +1078,99 @@
       "summary": "An RB-heavy build with reasonable ADP value (Taylor, Cook, Lamb) is undermined by taking A.J. Brown (IR) in R5 and Jordyn Tyson (IR) in R14 with no injury awareness. Two wasted QB picks (Maye and Caleb Williams) plus the dead IR spots leave the roster thin and poorly constructed relative to the field."
     }
   ],
-  "season": 2026
+  "season": 2026,
+  "locked_lineups": {
+    "1": {
+      "Baseline-A": {
+        "QB1": "4984",
+        "RB1": "9226",
+        "RB2": "12527",
+        "WR1": "9493",
+        "WR2": "7547",
+        "TE1": "11604",
+        "K1": "3451",
+        "DEF1": "NE",
+        "FLEX1": "9224",
+        "FLEX2": "11632"
+      },
+      "Baseline-B": {
+        "QB1": "11564",
+        "RB1": "6813",
+        "RB2": "8138",
+        "WR1": "6786",
+        "WR2": "5859",
+        "TE1": "12506",
+        "K1": "11786",
+        "DEF1": "HOU",
+        "FLEX1": "8150",
+        "FLEX2": "13287"
+      },
+      "Opus-4.8": {
+        "WR1": "9488",
+        "DEF1": "SEA",
+        "QB1": "6770",
+        "RB1": "9509",
+        "RB2": "8155",
+        "WR2": "7569",
+        "TE1": "8130",
+        "K1": "11533",
+        "FLEX1": "9997",
+        "FLEX2": "12512"
+      },
+      "Sonnet-5": {
+        "QB1": "6797",
+        "RB1": "9221",
+        "RB2": "4866",
+        "WR1": "6794",
+        "WR2": "10229",
+        "TE1": "12518",
+        "K1": "8259",
+        "DEF1": "PIT",
+        "FLEX1": "12507",
+        "FLEX2": "5850"
+      },
+      "Haiku-4.5": {
+        "RB1": "4034",
+        "K1": "2747",
+        "QB1": "4881",
+        "RB2": "3198",
+        "WR1": "7564",
+        "WR2": "6801",
+        "TE1": "12517",
+        "DEF1": "BAL",
+        "FLEX1": "7525",
+        "FLEX2": "8146"
+      }
+    }
+  },
+  "lineup_log": [
+    {
+      "week": 1,
+      "team": "Baseline-A",
+      "why": ""
+    },
+    {
+      "week": 1,
+      "team": "Baseline-B",
+      "why": ""
+    },
+    {
+      "week": 1,
+      "team": "Opus-4.8",
+      "why": "Started confirmed-healthy studs (Bijan, Breece, Collins, Burrow, McBride) and used FLEX on Flowers (WR15) and back-from-injury Judkins over high-variance WRs and a questionable McMillan."
+    },
+    {
+      "week": 1,
+      "team": "Sonnet-5",
+      "why": "Started the highest season_avg players at each mandatory slot, then filled FLEX with the next-best RB/WR (Hampton, Jacobs) over lower WRs/TE2; confirmed via web search that Rice avoids suspension and Warren is healthy for Week 1, while Dowdle drops to a committee role behind Warren in PIT so he stays benched."
+    },
+    {
+      "week": 1,
+      "team": "Haiku-4.5",
+      "why": "Prioritize elite talent (Chase, Jackson, Henry, Higgins) with healthy status confirmed. Fill remaining spots with highest-upside players (Smith, Wilson, Loveland) in favorable Week 1 matchups."
+    }
+  ],
+  "weekly_results": {},
+  "player_week_scores": {},
+  "cycle": {}
 }
