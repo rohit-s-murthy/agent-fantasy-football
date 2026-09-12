@@ -30,7 +30,7 @@ import os
 import sys
 from datetime import datetime
 
-from engine.data import load_players, draftable_players, weekly_points
+from engine.data import load_players, draftable_players, weekly_points, current_nfl_week_for_season
 from engine.league import Team, ROSTER_SLOTS, FLEX_ELIGIBLE, STARTING_FAAB
 from engine.state import load_league, save_league, teams_from_payload, teams_to_json
 from engine.projection import build_projections
@@ -163,15 +163,31 @@ def _fully_locked_weeks(locked_lineups: dict) -> list[int]:
     return sorted(int(w) for w, lineups in locked_lineups.items() if set(lineups.keys()) >= names)
 
 
+def _week_confirmed_complete(wk: int) -> bool:
+    """True once Sleeper's live week pointer has moved past `wk` (or `SEASON`
+    isn't the currently active season, meaning every week is inherently
+    already over). False — conservatively — if the check itself fails."""
+    try:
+        active_week = current_nfl_week_for_season(SEASON)
+    except Exception:
+        return False
+    return active_week is None or wk < active_week
+
+
 def _score_pending_weeks(payload: dict) -> bool:
-    """Fetch real results for any fully-locked-but-unscored week and score
-    each team's locked lineup against it. Fully mechanical, never pauses."""
+    """Fetch real results for any fully-locked, confirmed-complete-but-
+    unscored week and score each team's locked lineup against it. A week
+    still in progress is left alone — scoring it now would lock in a partial,
+    misleadingly-low result for anyone whose players haven't played yet.
+    Fully mechanical, never pauses."""
     locked_lineups = payload.get("locked_lineups", {})
     weekly_results = payload.setdefault("weekly_results", {})
     player_week_scores = payload.setdefault("player_week_scores", {})
     changed = False
     for wk in _fully_locked_weeks(locked_lineups):
         if str(wk) in weekly_results:
+            continue
+        if not _week_confirmed_complete(wk):
             continue
         proj = weekly_points(SEASON, wk)
         player_week_scores[str(wk)] = proj
@@ -236,6 +252,19 @@ def cmd_context():
     pmap = {p["id"]: p for p in pool}
     player_week_scores = payload.get("player_week_scores", {})
     locked_lineups = payload.get("locked_lineups", {})
+    weekly_results = payload.get("weekly_results", {})
+
+    # Don't open the next week's waiver/lineup phase until every fully-locked
+    # week ahead of it is actually confirmed scored (not just locked) — a
+    # week still in progress means it isn't safe to move on yet.
+    pending_score = [wk for wk in _fully_locked_weeks(locked_lineups) if str(wk) not in weekly_results]
+    if pending_score:
+        wk = min(pending_score)
+        print(json.dumps({
+            "status": "idle",
+            "reason": f"Week {wk} is locked but not yet confirmed complete — waiting for those games to finish before scoring or advancing.",
+        }, indent=2))
+        return
 
     next_week = _target_week(locked_lineups)
     llm_names = [e["name"] for e in LEAGUE if _is_llm(e)]

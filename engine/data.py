@@ -129,6 +129,17 @@ def weekly_stats(season: int, week: int) -> dict[str, dict]:
     return _get_json(url)
 
 
+def current_nfl_week_for_season(season: int) -> int | None:
+    """Sleeper's live 'current week' pointer, if `season` is the currently
+    active NFL season — used to tell whether a week's stats are final before
+    treating a partial in-progress fetch as the finished result. Returns None
+    for a past season (every week is inherently already complete)."""
+    state = _get_json(f"{BASE}/state/nfl")
+    if str(state.get("season")) != str(season):
+        return None
+    return int(state["week"])
+
+
 def weekly_points(season: int, week: int) -> dict[str, float]:
     """Return {player_id: fantasy_points} for a given season/week."""
     stats = weekly_stats(season, week)
