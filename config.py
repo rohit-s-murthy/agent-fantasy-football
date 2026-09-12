@@ -12,6 +12,7 @@ Each team entry supports:
               Use this to point two teams at different keys/accounts if needed.
     persona   OPTIONAL: a sentence steering that manager's drafting style.
     base_url  OPTIONAL: override the API endpoint (e.g. a proxy or Azure).
+    avatar    OPTIONAL: an emoji shown on the live draft board.
 
 Set the API keys you need before running, e.g.:
     export ANTHROPIC_API_KEY=sk-ant-...
@@ -34,22 +35,25 @@ LEAGUE = [
         "provider": "anthropic",
         "model": "claude-opus-4-8",
         "persona": "Balanced, value-based drafter who builds a stable weekly floor.",
+        "avatar": "🦉",
     },
     {
         "name": "Sonnet-5",
         "provider": "anthropic",
         "model": "claude-sonnet-5",
         "persona": "Aggressive; chases upside and positional edges.",
+        "avatar": "🐺",
     },
     {
         "name": "Haiku-4.5",
         "provider": "anthropic",
         "model": "claude-haiku-4-5-20251001",
         "persona": "Fast and disciplined; sticks close to ADP and avoids reaches.",
+        "avatar": "⚡",
     },
     # Non-LLM baselines so the comparison has a "dumb money" reference point.
-    {"name": "Baseline-A", "provider": "heuristic", "model": ""},
-    {"name": "Baseline-B", "provider": "heuristic", "model": ""},
+    {"name": "Baseline-A", "provider": "heuristic", "model": "", "avatar": "🤖"},
+    {"name": "Baseline-B", "provider": "heuristic", "model": "", "avatar": "🎯"},
 ]
 
 # Scoring + roster rules live in engine/league.py. Change the field size just by

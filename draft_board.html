@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>AI Fantasy Draft — Live Board</title>
+<style>
+  :root { color-scheme: dark; }
+  body { font-family: -apple-system, Segoe UI, Roboto, sans-serif; background: #0f1115; color: #e6e6e6; margin: 0; padding: 24px; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  #status { color: #9aa0a6; margin-bottom: 18px; font-size: 14px; }
+  #status.complete { color: #5ee6a0; }
+  table { border-collapse: collapse; width: 100%; table-layout: fixed; }
+  th, td { border: 1px solid #23262e; padding: 6px 8px; text-align: left; vertical-align: top; font-size: 12.5px; }
+  th { background: #171a21; position: sticky; top: 0; }
+  .team-header { font-weight: 600; }
+  .badge { display: inline-block; font-size: 10px; padding: 1px 6px; border-radius: 10px; margin-left: 6px; color: #0f1115; font-weight: 700; }
+  .prov-anthropic { background: #d3a4f5; }
+  .prov-openai { background: #7fd3f0; }
+  .prov-google { background: #f5c26b; }
+  .prov-heuristic { background: #9aa0a6; }
+  .round-label { color: #666; font-weight: 600; width: 46px; }
+  .cell-filled { background: #171b24; }
+  .cell-pos-QB { border-left: 3px solid #f26b6b; }
+  .cell-pos-RB { border-left: 3px solid #6bf283; }
+  .cell-pos-WR { border-left: 3px solid #6ba8f2; }
+  .cell-pos-TE { border-left: 3px solid #f2d16b; }
+  .cell-pos-K  { border-left: 3px solid #b06bf2; }
+  .cell-pos-DEF{ border-left: 3px solid #6bf2e0; }
+  .pname { font-weight: 600; }
+  .pmeta { color: #9aa0a6; font-size: 11px; }
+  .pwhy { color: #b8bdc4; font-size: 11px; font-style: italic; margin-top: 3px;
+          display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .on-clock { outline: 2px solid #5ee6a0; }
+  #clock-banner { padding: 8px 12px; background: #16321f; border: 1px solid #2e6b45; border-radius: 6px; margin-bottom: 14px; font-size: 13.5px; display: none; }
+  .avatar { font-size: 18px; margin-right: 6px; }
+  #grades { display: none; margin-top: 24px; }
+  #grades h2 { font-size: 17px; margin-bottom: 10px; }
+  .grade-card { background: #171a21; border: 1px solid #23262e; border-radius: 8px; padding: 12px 14px; margin-bottom: 10px; }
+  .grade-card .gh { display: flex; align-items: center; gap: 8px; font-weight: 700; margin-bottom: 4px; }
+  .grade-letter { display: inline-block; min-width: 28px; text-align: center; padding: 2px 8px; border-radius: 6px; background: #2e6b45; color: #d7ffe6; font-size: 13px; }
+  .grade-summary { color: #c7ccd3; font-size: 13px; }
+</style>
+</head>
+<body>
+  <h1>AI Fantasy Draft — Live Board</h1>
+  <div id="status">loading…</div>
+  <div id="clock-banner"></div>
+  <table>
+    <thead><tr id="header-row"><th class="round-label">Rd</th></tr></thead>
+    <tbody id="body"></tbody>
+  </table>
+  <div id="grades">
+    <h2>Draft Grades</h2>
+    <div id="grade-cards"></div>
+  </div>
+
+<script>
+const REFRESH_MS = 1500;
+let lastPickCount = -1;
+
+function snakeOrder(numTeams, rounds) {
+  const order = [];
+  for (let r = 0; r < rounds; r++) {
+    let slots = Array.from({length: numTeams}, (_, i) => i + 1);
+    if (r % 2 === 1) slots = slots.reverse();
+    order.push(...slots);
+  }
+  return order;
+}
+
+async function tick() {
+  let data;
+  try {
+    data = await (await fetch('state/draft_progress.json', {cache: 'no-store'})).json();
+  } catch (e) {
+    document.getElementById('status').textContent = 'Waiting for draft to start…';
+    return;
+  }
+  render(data);
+}
+
+function render(data) {
+  const meta = data.meta;
+  const teams = meta.teams;
+  const rounds = meta.rounds;
+  const order = snakeOrder(teams.length, rounds);
+  const overall = data.overall;
+  const statusEl = document.getElementById('status');
+  const bannerEl = document.getElementById('clock-banner');
+
+  if (data.status === 'complete') {
+    statusEl.textContent = `Draft complete — ${data.pick_log.length} picks.`;
+    statusEl.className = 'complete';
+    bannerEl.style.display = 'none';
+  } else {
+    statusEl.textContent = `Pick ${overall} of ${teams.length * rounds} in progress…`;
+    statusEl.className = '';
+    if (overall <= order.length) {
+      const slot = order[overall - 1];
+      const team = teams[slot - 1];
+      const rnd = Math.floor((overall - 1) / teams.length) + 1;
+      bannerEl.style.display = 'block';
+      bannerEl.textContent = `On the clock: ${team.name} (Round ${rnd}, Pick ${overall})`;
+    }
+  }
+
+  // header row
+  const headerRow = document.getElementById('header-row');
+  headerRow.innerHTML = '<th class="round-label">Rd</th>';
+  teams.forEach(t => {
+    const th = document.createElement('th');
+    th.className = 'team-header';
+    const avatar = t.avatar || '🏈';
+    th.innerHTML = `<span class="avatar">${avatar}</span>${t.name}<span class="badge prov-${t.provider}">${t.provider === 'heuristic' ? 'baseline' : t.model}</span>`;
+    headerRow.appendChild(th);
+  });
+
+  // build grid: grid[round][slot] = pick or null
+  const grid = {};
+  for (const pick of data.pick_log) {
+    grid[`${pick.round}-${pick.slot}`] = pick;
+  }
+
+  const body = document.getElementById('body');
+  body.innerHTML = '';
+  for (let r = 1; r <= rounds; r++) {
+    const tr = document.createElement('tr');
+    const rdTd = document.createElement('td');
+    rdTd.className = 'round-label';
+    rdTd.textContent = r;
+    tr.appendChild(rdTd);
+    teams.forEach((t, idx) => {
+      const slot = idx + 1;
+      const td = document.createElement('td');
+      const pick = grid[`${r}-${slot}`];
+      const pickNumber = (r - 1) * teams.length + (r % 2 === 1 ? slot : teams.length - slot + 1);
+      if (pick) {
+        td.className = `cell-filled cell-pos-${pick.pos}`;
+        const whyTitle = pick.why ? ` title="${pick.why.replace(/"/g, '&quot;')}"` : '';
+        const whyBlock = pick.why ? `<div class="pwhy">"${pick.why}"</div>` : '';
+        td.innerHTML = `<div class="pname"${whyTitle}>${pick.player}</div><div class="pmeta">${pick.pos} · ${pick.nfl_team} · ADP ${pick.adp}</div>${whyBlock}`;
+      } else if (pickNumber === data.overall && data.status !== 'complete') {
+        td.className = 'on-clock';
+        td.textContent = '…';
+      }
+      tr.appendChild(td);
+    });
+    body.appendChild(tr);
+  }
+
+  renderGrades(data, teams);
+}
+
+function renderGrades(data, teams) {
+  const gradesEl = document.getElementById('grades');
+  const cardsEl = document.getElementById('grade-cards');
+  if (!data.grades || !data.grades.length) {
+    gradesEl.style.display = 'none';
+    return;
+  }
+  const byName = Object.fromEntries(teams.map(t => [t.name, t]));
+  gradesEl.style.display = 'block';
+  cardsEl.innerHTML = '';
+  data.grades.forEach(g => {
+    const t = byName[g.team] || {};
+    const card = document.createElement('div');
+    card.className = 'grade-card';
+    card.innerHTML = `
+      <div class="gh"><span class="avatar">${t.avatar || '🏈'}</span>${g.team}<span class="grade-letter">${g.grade}</span></div>
+      <div class="grade-summary">${g.summary}</div>`;
+    cardsEl.appendChild(card);
+  });
+}
+
+tick();
+setInterval(tick, REFRESH_MS);
+</script>
+</body>
+</html>
