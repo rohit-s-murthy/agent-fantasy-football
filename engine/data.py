@@ -54,6 +54,7 @@ def draftable_players(players: dict[str, dict]) -> list[dict]:
     Adds a normalized `name`, `pos`, `team`, and `adp` (rank proxy) to each.
     """
     out = []
+    def_rank = 190  # Sleeper never sets search_rank for DEF; slot them in late like kickers.
     for pid, p in players.items():
         pos = p.get("position")
         if pos not in SKILL_POSITIONS:
@@ -63,7 +64,10 @@ def draftable_players(players: dict[str, dict]) -> list[dict]:
             if p.get("active") is False:
                 continue
         rank = p.get("search_rank")
-        if rank is None or rank > 500:
+        if pos == "DEF":
+            rank = def_rank
+            def_rank += 1
+        elif rank is None or rank > 500:
             continue
         # Drop players with no current NFL team (retired / free agents).
         if pos != "DEF" and not p.get("team"):

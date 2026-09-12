@@ -40,9 +40,19 @@ class HeuristicAgent(Agent):
         available = ctx["available"]        # list of player dicts, ADP-sorted
         needs = ctx["needs"]                # {pos: count_needed}
         have = ctx.get("have", {})          # {pos: count_on_roster}
+        pool = list(available[:40])         # only consider a reasonable window
+        # K/DEF sit far past ADP 40 in a full player pool, so they'd never
+        # enter the window above even in the last two rounds. Pull the best
+        # available of each in explicitly once it's time to draft them.
+        if ctx["round"] >= ctx["rounds"] - 1:
+            for pos in ("K", "DEF"):
+                if not any(p["pos"] == pos for p in pool):
+                    best_at_pos = next((p for p in available if p["pos"] == pos), None)
+                    if best_at_pos:
+                        pool.append(best_at_pos)
         best = None
         best_score = 1e9
-        for p in available[:40]:            # only consider a reasonable window
+        for p in pool:
             score = p["adp"]
             pos = p["pos"]
             # Hard cap: effectively skip positions we've filled to the brim.
@@ -52,9 +62,14 @@ class HeuristicAgent(Agent):
                 score -= 15                 # prioritize a starting need
             elif pos in FLEX_ELIGIBLE and needs.get("FLEX", 0) > 0:
                 score -= 6
-            # Don't draft K/DEF until the last two rounds.
-            if pos in ("K", "DEF") and ctx["round"] < ctx["rounds"] - 1:
-                score += 200
+            # Don't draft K/DEF until the last two rounds; once there, a still-
+            # needed K/DEF must win outright or a lower-ADP skill player (there
+            # are always plenty left in a big pool) would keep beating it out.
+            if pos in ("K", "DEF"):
+                if ctx["round"] < ctx["rounds"] - 1:
+                    score += 200
+                elif needs.get(pos, 0) > 0:
+                    score -= 1000
             if score < best_score:
                 best_score = score
                 best = p
