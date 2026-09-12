@@ -6,6 +6,12 @@ simulates scored weeks using real Sleeper weekly stats.
 Usage:
     python run.py draft                 # run a draft with the configured field
     python run.py season 2025 1 14      # score weeks 1-14 of the 2025 season
+
+`season` re-optimizes each week's lineup against that week's own actual
+results (hindsight) — it's the fallback path for a season not using
+interactive_week.py's pre-game lineup lock. It refuses to touch any week
+interactive_week.py has already locked (see cmd_season below), so the two
+never fight over the same week.
 """
 from __future__ import annotations
 import sys
@@ -73,12 +79,17 @@ def cmd_season(season: int, start: int, end: int, rescore: bool = False):
         return
     teams = teams_from_payload(payload)
     weekly_results = payload.get("weekly_results", {})
+    locked_lineups = payload.get("locked_lineups", {})
     agents = build_agents()
     players_raw = load_players()
     pmap = {p["id"]: p for p in draftable_players(players_raw)}
 
     for wk in range(start, end + 1):
         key = str(wk)
+        if key in locked_lineups:
+            print(f"\n--- Week {wk} --- skipped: already locked by interactive_week.py. "
+                  f"Use that tool (not `season`) to score or re-lock this week.")
+            continue
         if key in weekly_results and not rescore:
             continue  # already scored this week; use --rescore to redo it
         proj = weekly_points(season, wk)  # actual points as "projection" proxy

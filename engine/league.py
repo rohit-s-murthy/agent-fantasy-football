@@ -18,6 +18,7 @@ BENCH_SIZE = 6
 ROUNDS = sum(ROSTER_SLOTS.values()) + BENCH_SIZE  # total draft rounds
 
 SCORING_NAME = "0.5 PPR"
+STARTING_FAAB = 100  # season-long waiver budget per team
 
 
 @dataclass
