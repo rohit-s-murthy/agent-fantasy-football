@@ -29,26 +29,29 @@ to heuristic play, so the league always completes.
 # GPT/Gemini teams without their keys would silently fall back to heuristic
 # play, which would make the "model comparison" meaningless. Once
 # OPENAI_API_KEY / GEMINI_API_KEY are set, swap in GPT/Gemini entries.
+#
+# Persona is intentionally omitted for every LLM team here: giving each model
+# a different persona would confound the comparison (a behavior difference
+# could be the persona being followed rather than the model itself). Add
+# personas back only if the goal shifts from "compare models" to "characterful
+# league" — and then give every LLM team the same one, or none at all.
 LEAGUE = [
     {
         "name": "Opus-4.8",
         "provider": "anthropic",
         "model": "claude-opus-4-8",
-        "persona": "Balanced, value-based drafter who builds a stable weekly floor.",
         "avatar": "🦉",
     },
     {
         "name": "Sonnet-5",
         "provider": "anthropic",
         "model": "claude-sonnet-5",
-        "persona": "Aggressive; chases upside and positional edges.",
         "avatar": "🐺",
     },
     {
         "name": "Haiku-4.5",
         "provider": "anthropic",
         "model": "claude-haiku-4-5-20251001",
-        "persona": "Fast and disciplined; sticks close to ADP and avoids reaches.",
         "avatar": "⚡",
     },
     # Non-LLM baselines so the comparison has a "dumb money" reference point.
