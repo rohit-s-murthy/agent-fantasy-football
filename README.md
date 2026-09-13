@@ -107,32 +107,46 @@ python interactive_week.py waiver <team> --add <id> --drop <id> --bid <N>
 python interactive_week.py lineup <team> '{"QB1": "<id>", "RB1": "<id>", ...}'
 ```
 
-Each `context` call: scores the most recently completed week (against the
-lineup that was actually locked in advance — never touches that week's own
-results before it's locked), runs that week's FAAB waiver window (heuristic
-teams always pass — they're the "draft once, never touch it again" control
-group), then locks next week's lineup. Non-hindsight lineup signal for the
-heuristic baseline is each player's season-average points so far
-(`engine/projection.py`), falling back to ADP before any weeks are scored.
-LLM teams get that same number plus web search for matchups/injuries — same
-pattern as the draft's research step.
+Each `context` call: scores the target week once Sleeper confirms it's
+actually complete (never scores a week that's still in progress), runs that
+week's FAAB waiver window once (heuristic teams always pass — they're the
+"draft once, never touch it again" control group), then checks lineups.
+Non-hindsight lineup signal for the heuristic baseline is each player's
+season-average points so far (`engine/projection.py`), falling back to ADP
+before any weeks are scored. LLM teams get that same number plus web search
+for matchups/injuries — same pattern as the draft's research step.
 
-Sequencing is state-driven (the next unscored/unlocked week), not
-calendar-driven — run `context` on whatever cadence you want (e.g. every
-Wednesday, before that week's games start); nothing here computes real
-dates. `run.py season` refuses to touch any week `interactive_week.py` has
-already locked, so the two tools can't fight over the same week.
+**Daily cadence, not one-shot locks.** Meant to be triggered every morning
+(e.g. a scheduled cron agent), not once a week: waivers open exactly once
+per week transition, but a lineup is never a permanent lock the moment it's
+submitted — an LLM team gets another chance to revise its target week's
+lineup once per calendar day, right up until that week is confirmed scored.
+This exists because injury/inactive news can land as late as game-day
+morning (a Saturday inactive list for Sunday's games, say), and a strictly
+weekly cadence would miss it. Heuristic lineups are recomputed fresh on
+every call regardless of cadence — it's cheap and idempotent. If a routine
+run is ever missed entirely and a week's games finish with an LLM team
+never having submitted anything, scoring falls back to a fresh heuristic
+lineup for that team rather than stalling.
+
+Sequencing is state-driven (the first not-yet-scored week), not
+calendar-driven — run `context` on whatever real-world schedule you want;
+nothing here computes calendar dates itself except to gate "have I already
+asked this team today." `run.py season` refuses to touch any week
+`interactive_week.py` has already locked, so the two tools can't fight over
+the same week.
 
 **Safeguard against accidental hindsight:** if a player's game has already
-been played by decision time (only realistic for Week 1, since a season can
-start before the draft/first cycle does), their start/bench status is forced
-to match the blind ADP/season-average assignment regardless of what's
-submitted — a model can't bench a known-bad performance or chase a
-known-good one. Judgment only applies to players who genuinely haven't
-played yet.
+been played by decision time, their start/bench status is forced to match
+the blind ADP/season-average assignment regardless of what's submitted — a
+model can't bench a known-bad performance or chase a known-good one. This
+is what makes daily revision safe: judgment only ever applies to players
+who genuinely haven't played yet. In practice this only bites on Week 1,
+since the season can start before the first cycle runs; every subsequent
+week is naturally decided before kickoff.
 
-Not yet built: automating the weekly trigger (currently manual) and a live
-board for the season (the `draft_board.html` pattern would extend naturally).
+Not yet built: a live board for the season (the `draft_board.html` pattern
+would extend naturally).
 
 ## Notes / honest limitations
 - ADP (`search_rank`) is a decent draft signal but not true expert projections.

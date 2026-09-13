@@ -3,16 +3,23 @@ the same way interactive_draft.py drove the draft (Claude-Code-subagent
 orchestration, no ANTHROPIC_API_KEY needed).
 
 Sequencing is state-driven, not calendar-driven: this always operates on
-"the earliest locked-but-unscored week" (score it) and "the next not-yet-
-locked week" (run its waiver window, then lock its lineups). Whoever
-triggers this (a human, or a scheduled cron agent) is responsible for
-picking the right real-world cadence — e.g. every Wednesday, before that
-week's games start.
+"the first not-yet-scored week." Meant to be triggered daily (e.g. a
+scheduled cron agent, every morning): waivers open once per week transition
+(gated by `cycle.waivers_done`), but a lineup is never a one-shot lock — an
+LLM team gets another chance to revise its target-week lineup once per
+calendar day, right up until that week is confirmed scored, so late-breaking
+injury/role news (a Saturday inactive list for Sunday's games, say) can
+still be acted on. This is safe against hindsight because any player whose
+game has already been played by decision time has their start/bench status
+forced to the blind ADP/season-average assignment regardless of what's
+submitted (see `_resolve_lineup`) — a revision can only use genuine judgment
+on players who haven't played yet.
 
     python interactive_week.py context
-        # Scores any completed-but-unscored week automatically, then pauses
-        # on the next LLM decision needed (a waiver call or a lineup), or
-        # reports "idle" if this week's cycle is fully locked.
+        # Scores the target week once Sleeper confirms it's complete, then
+        # pauses on the next LLM decision needed (a waiver call, or a team
+        # that hasn't revised its lineup yet today), or reports "idle" if
+        # everyone's done for today.
 
     python interactive_week.py waiver <team> --pass
     python interactive_week.py waiver <team> --add <id> --drop <id> --bid <N> [--why "..."]
@@ -20,9 +27,9 @@ week's games start.
     python interactive_week.py lineup <team> '{"QB1": "<id>", "RB1": "<id>", ...}' [--why "..."]
 
 Heuristic teams never submit waiver claims (they're the "draft once, never
-touch it again" control group) and their lineups are set automatically from
-season-average production so far (engine/projection.py) — only LLM teams
-pause for input.
+touch it again" control group); their lineup is recomputed fresh from
+season-average production (engine/projection.py) every time this runs — only
+LLM teams pause for input, once per day.
 """
 from __future__ import annotations
 import json
@@ -146,21 +153,20 @@ def _all_team_names() -> list[str]:
     return [e["name"] for e in LEAGUE]
 
 
-def _target_week(locked_lineups: dict) -> int:
-    """The week currently being worked on: the first one that doesn't yet
-    have every team's lineup locked. A week with a partial lineup (e.g. only
-    the heuristic teams auto-resolved so far) is still the target — not
-    "done" just because its key exists."""
-    names = set(_all_team_names())
+def _today_str() -> str:
+    return datetime.utcnow().date().isoformat()
+
+
+def _target_week(weekly_results: dict) -> int:
+    """The week currently being worked on: the first one not yet scored.
+    Weeks before it are scored by definition; the week itself may have no
+    lineups at all yet (bootstrap), a partial set, or a fully day-refreshed
+    set — none of that matters for *which* week is the target, only whether
+    it's been scored."""
     week = 1
-    while set(locked_lineups.get(str(week), {}).keys()) >= names:
+    while str(week) in weekly_results:
         week += 1
     return week
-
-
-def _fully_locked_weeks(locked_lineups: dict) -> list[int]:
-    names = set(_all_team_names())
-    return sorted(int(w) for w, lineups in locked_lineups.items() if set(lineups.keys()) >= names)
 
 
 def _week_confirmed_complete(wk: int) -> bool:
@@ -175,30 +181,39 @@ def _week_confirmed_complete(wk: int) -> bool:
 
 
 def _score_pending_weeks(payload: dict) -> bool:
-    """Fetch real results for any fully-locked, confirmed-complete-but-
-    unscored week and score each team's locked lineup against it. A week
-    still in progress is left alone — scoring it now would lock in a partial,
-    misleadingly-low result for anyone whose players haven't played yet.
-    Fully mechanical, never pauses."""
-    locked_lineups = payload.get("locked_lineups", {})
+    """If the target week is confirmed complete, score it and advance.
+    A week still in progress is left alone — scoring it now would lock in a
+    partial, misleadingly-low result for anyone whose players haven't played
+    yet. Any team that never got a lineup submitted this week (e.g. a missed
+    routine run) falls back to a fresh heuristic lineup so scoring never
+    stalls on a missing submission. Fully mechanical, never pauses."""
     weekly_results = payload.setdefault("weekly_results", {})
     player_week_scores = payload.setdefault("player_week_scores", {})
-    changed = False
-    for wk in _fully_locked_weeks(locked_lineups):
-        if str(wk) in weekly_results:
+    locked_lineups = payload.setdefault("locked_lineups", {})
+    week = _target_week(weekly_results)
+    if not _week_confirmed_complete(week):
+        return False
+
+    week_key = str(week)
+    week_lineups = locked_lineups.setdefault(week_key, {})
+    teams = teams_from_payload(payload)
+    pool = draftable_players(load_players())
+    pmap = {p["id"]: p for p in pool}
+    for t in teams:
+        if t.name in week_lineups:
             continue
-        if not _week_confirmed_complete(wk):
-            continue
-        proj = weekly_points(SEASON, wk)
-        player_week_scores[str(wk)] = proj
-        weekly_results[str(wk)] = {
-            name: round(sum(proj.get(pid, 0) for pid in lineup.values()), 2)
-            for name, lineup in locked_lineups[str(wk)].items()
-        }
-        changed = True
-    if changed:
-        save_league(SEASON, weekly_results=weekly_results, player_week_scores=player_week_scores)
-    return changed
+        roster_players = [pmap[pid] for pid in t.roster if pid in pmap]
+        projections = build_projections(roster_players, player_week_scores)
+        week_lineups[t.name] = HeuristicAgent().set_lineup({"projections": projections, "roster": roster_players})
+
+    proj = weekly_points(SEASON, week)
+    player_week_scores[week_key] = proj
+    weekly_results[week_key] = {
+        name: round(sum(proj.get(pid, 0) for pid in lineup.values()), 2)
+        for name, lineup in week_lineups.items()
+    }
+    save_league(SEASON, weekly_results=weekly_results, player_week_scores=player_week_scores, locked_lineups=locked_lineups)
+    return True
 
 
 def _resolve_waiver_phase(payload: dict, teams_by_name: dict[str, Team], week: int, free_agent_ids: set[str]) -> None:
@@ -254,19 +269,7 @@ def cmd_context():
     locked_lineups = payload.get("locked_lineups", {})
     weekly_results = payload.get("weekly_results", {})
 
-    # Don't open the next week's waiver/lineup phase until every fully-locked
-    # week ahead of it is actually confirmed scored (not just locked) — a
-    # week still in progress means it isn't safe to move on yet.
-    pending_score = [wk for wk in _fully_locked_weeks(locked_lineups) if str(wk) not in weekly_results]
-    if pending_score:
-        wk = min(pending_score)
-        print(json.dumps({
-            "status": "idle",
-            "reason": f"Week {wk} is locked but not yet confirmed complete — waiting for those games to finish before scoring or advancing.",
-        }, indent=2))
-        return
-
-    next_week = _target_week(locked_lineups)
+    next_week = _target_week(weekly_results)
     llm_names = [e["name"] for e in LEAGUE if _is_llm(e)]
     heuristic_names = [e["name"] for e in LEAGUE if not _is_llm(e)]
 
@@ -304,36 +307,39 @@ def cmd_context():
         cycle = {"week": next_week, "waiver_submissions": {}, "waivers_done": True}
         save_league(SEASON, cycle=cycle)
 
-    # --- Lineup phase ---
+    # --- Lineup phase: heuristic teams are recomputed fresh every call (cheap,
+    # idempotent, always reflects the latest season-average signal); LLM teams
+    # are asked at most once per calendar day for the target week, so a
+    # revision stays available right up until the week is confirmed scored.
     week_key = str(next_week)
     week_lineups = locked_lineups.get(week_key, {})
-    lineup_log = payload.get("lineup_log", [])
+    today = _today_str()
+    lineup_daily = payload.get("lineup_daily", {})
+    if lineup_daily.get("week") != next_week or lineup_daily.get("date") != today:
+        lineup_daily = {"week": next_week, "date": today, "updated": []}
 
-    changed = False
     for name in heuristic_names:
-        if name in week_lineups:
-            continue
         team = teams_by_name[name]
         roster_players = [pmap[pid] for pid in team.roster if pid in pmap]
         projections = build_projections(roster_players, player_week_scores)
         week_lineups[name] = HeuristicAgent().set_lineup({"projections": projections, "roster": roster_players})
-        lineup_log.append({"week": next_week, "team": name, "why": ""})
-        changed = True
-    if changed:
-        locked_lineups[week_key] = week_lineups
-        save_league(SEASON, locked_lineups=locked_lineups, lineup_log=lineup_log)
+    locked_lineups[week_key] = week_lineups
+    save_league(SEASON, locked_lineups=locked_lineups)
 
-    missing = [n for n in llm_names if n not in week_lineups]
+    missing = [n for n in llm_names if n not in lineup_daily.get("updated", [])]
     if missing:
         name = missing[0]
         team = teams_by_name[name]
         roster_players = [pmap[pid] for pid in team.roster if pid in pmap]
         projections = build_projections(roster_players, player_week_scores)
         locked_ids = _already_played_ids(next_week) & {p["id"] for p in roster_players}
+        save_league(SEASON, lineup_daily=lineup_daily, cycle=cycle)
         payload_out = {
             "status": "awaiting_lineup",
             "team": name,
             "week": next_week,
+            "date": today,
+            "current_lineup": week_lineups.get(name),
             "roster": [_player_brief(p, projections) for p in roster_players],
             "slots_needed": slot_names(),
         }
@@ -348,14 +354,15 @@ def cmd_context():
         print(json.dumps(payload_out, indent=2))
         return
 
-    weekly_results = payload.get("weekly_results", {})
+    save_league(SEASON, lineup_daily=lineup_daily, cycle=cycle)
     standings = {}
     for wk_scores in weekly_results.values():
         for name, pts in wk_scores.items():
             standings[name] = round(standings.get(name, 0) + pts, 2)
     print(json.dumps({
         "status": "idle",
-        "week_locked": next_week,
+        "week_in_progress": next_week,
+        "week_confirmed_complete": _week_confirmed_complete(next_week),
         "scored_through": max((int(w) for w in weekly_results), default=0),
         "standings": dict(sorted(standings.items(), key=lambda kv: -kv[1])),
         "faab_budget": payload.get("faab_budget", {}),
@@ -367,8 +374,7 @@ def cmd_waiver(team_name: str, add_id: str | None = None, drop_id: str | None = 
     if payload is None:
         print(json.dumps({"error": f"No draft found for {SEASON}."}))
         return
-    locked_lineups = payload.get("locked_lineups", {})
-    next_week = _target_week(locked_lineups)
+    next_week = _target_week(payload.get("weekly_results", {}))
     cycle = payload.get("cycle", {})
     if cycle.get("week") != next_week:
         cycle = {"week": next_week, "waiver_submissions": {}, "waivers_done": next_week == 1}
@@ -396,15 +402,23 @@ def cmd_lineup(team_name: str, lineup_json: str, why: str = ""):
     roster_players = [pmap[pid] for pid in team.roster if pid in pmap]
     projections = build_projections(roster_players, payload.get("player_week_scores", {}))
 
-    locked_lineups = payload.get("locked_lineups", {})
-    next_week = _target_week(locked_lineups)
+    next_week = _target_week(payload.get("weekly_results", {}))
     locked_ids = _already_played_ids(next_week) & {p["id"] for p in roster_players}
     lineup = _resolve_lineup(roster_players, json.loads(lineup_json), projections, locked_ids)
+    locked_lineups = payload.get("locked_lineups", {})
     week_lineups = locked_lineups.setdefault(str(next_week), {})
     week_lineups[team_name] = lineup
     lineup_log = payload.get("lineup_log", [])
-    lineup_log.append({"week": next_week, "team": team_name, "why": why})
-    save_league(SEASON, locked_lineups=locked_lineups, lineup_log=lineup_log)
+    today = _today_str()
+    lineup_log.append({"week": next_week, "team": team_name, "why": why, "date": today})
+
+    lineup_daily = payload.get("lineup_daily", {})
+    if lineup_daily.get("week") != next_week or lineup_daily.get("date") != today:
+        lineup_daily = {"week": next_week, "date": today, "updated": []}
+    if team_name not in lineup_daily["updated"]:
+        lineup_daily["updated"].append(team_name)
+
+    save_league(SEASON, locked_lineups=locked_lineups, lineup_log=lineup_log, lineup_daily=lineup_daily)
     print(json.dumps({"locked_lineup": {"team": team_name, "week": next_week, "lineup": lineup}}))
 
 
